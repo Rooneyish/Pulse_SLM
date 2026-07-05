@@ -85,7 +85,7 @@ class WikiDataPipepline:
             tokenized_sentence.append(encoded_seq)
         return tokenized_sentence
     
-    def construct_tensor(self, tokenized_sentences, is_validation=False):
+    def construct_tensor(self, tokenized_sentences, max_seq_len):
         sequence = []
         for sentence in tokenized_sentences:
             for i in range(1, len(sentence)):
@@ -94,18 +94,14 @@ class WikiDataPipepline:
         tensor_seq = [torch.tensor(seq) for seq in sequence]
         padded_sequence = pad_sequence(tensor_seq, batch_first=True, padding_side='left', padding_value=0)
 
-        if not is_validation:
-            self.max_seq_len = padded_sequence.shape[1]
-        else:
-            if padded_sequence.shape[1] < self.max_seq_len:
-                pad_amt = self.max_seq_len - padded_sequence.shape[1]
-                padded_sequence = torch.nn.functional.pad(padded_sequence, (pad_amt, 0), value=0)
-            elif padded_sequence.shape[1] > self.max_seq_len:
-                padded_sequence = padded_sequence[:, -self.max_seq_len:]
+        if padded_sequence.shape[1] < max_seq_len:
+            pad_amt = max_seq_len - padded_sequence.shape[1]
+            padded_sequence = torch.nn.functional.pad(padded_sequence, (pad_amt, 0), value=0)
+        elif padded_sequence.shape[1] > max_seq_len:
+            padded_sequence = padded_sequence[:, -max_seq_len:]
 
         X = padded_sequence[:, :-1]
         y = padded_sequence[:, -1]
-
         return X, y
     
     def run_pipeline(self):
@@ -125,11 +121,10 @@ class WikiDataPipepline:
         print("Sentence tokenization completed. Building vocabulary...")
 
         self.build_vocab(train_sentences)
-        print("Vocabulary built successfully. Encoding sentences...")
+        print("Vocabulary built successfully. Encoding training sentences...")
 
         train_tokenized = self.encode_sentence()
-        X_train, y_train = self.construct_tensor(train_tokenized)
-        print("Training data encoded and tensor constructed. Processing validation data...")
+        print("Training sentences encoded. Tokenizing validation sentences...")
 
         val_tokens_list = []
         for sentence in val_sentences:
@@ -139,8 +134,16 @@ class WikiDataPipepline:
 
         self.tokens = val_tokens_list
         val_tokenized = self.encode_sentence()
-        X_val, y_val = self.construct_tensor(val_tokenized)
-        print("Validation data encoded and tensor constructed. Creating DataLoaders...")
+        print("Validation sentences encoded. Computing global max sequence length...")
+
+        self.max_seq_len = max(len(seq) for seq in train_tokenized + val_tokenized)
+        print(f"Global max_seq_len set to {self.max_seq_len}. Constructing training tensors...")
+
+        X_train, y_train = self.construct_tensor(train_tokenized, self.max_seq_len)
+        print(f"Training tensors constructed (X_train shape: {X_train.shape}). Constructing validation tensors...")
+
+        X_val, y_val = self.construct_tensor(val_tokenized, self.max_seq_len)
+        print(f"Validation tensors constructed (X_val shape: {X_val.shape}). Saving data...")
 
         save_dir = self.data_dir / "processed"
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +180,13 @@ if __name__ == "__main__":
         train_dl, val_dl = pipeline.run_pipeline()
         
         for bx, by in train_dl:
-            print("\n--- Final Script Verification ---")
+            print("\n--- Final Script Verification for Training Data ---")
+            print("Batch X Tensor Shape:", bx.shape)
+            print("Batch y Tensor Shape:", by.shape)
+            break
+
+        for bx, by in val_dl:
+            print("\n--- Final Script Verification for Validation Data ---")
             print("Batch X Tensor Shape:", bx.shape)
             print("Batch y Tensor Shape:", by.shape)
             break
